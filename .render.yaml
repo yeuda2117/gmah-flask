@@ -1,7 +1,6 @@
-
 services:
   - type: web
-    name: gmah-api-debug
+    name: gmah-api-debugfull
     env: python
     plan: free
     buildCommand: ""
