@@ -57,7 +57,7 @@ def handle_text(text):
         if score>=1:
             matches.append(row)
     if not matches:
-        return "say_api_answer=yes\nid_list_message=t-לא נמצא גמ"ח מתאים"
+        return "say_api_answer=yes\nid_list_message=t-לא נמצא גמח מתאים"
     if len(matches)==1:
         m=matches[0]
         if m["ext"]:
