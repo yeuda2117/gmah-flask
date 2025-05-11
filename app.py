@@ -1,35 +1,34 @@
+
 from flask import Flask, request
-import requests, os, csv, tempfile, shutil
-from pathlib import Path
+import requests, os, csv, tempfile
 
-ELEVEN_API_KEY = os.environ.get("ELEVEN_API_KEY")  # set this in Render env vars
+ELEVEN_API_KEY = os.environ.get("ELEVEN_API_KEY")
 ELEVEN_ENDPOINT = "https://api.elevenlabs.io/v1/speech-to-text"
-
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1jK7RsgJzi26JqBd40rqwzgldm9HKeGAp6Z4_8sR524U/export?format=csv"
 
 app = Flask(__name__)
 
+# ---- helpers ----
 def load_sheet():
     try:
         resp = requests.get(SHEET_URL, timeout=10)
         resp.raise_for_status()
-        lines = resp.text.splitlines()
-        reader = csv.DictReader(lines)
-        rows = []
-        for row in reader:
+        reader = csv.DictReader(resp.text.splitlines())
+        rows=[]
+        for r in reader:
             rows.append({
-                "name": row.get("שם הגמח",""),
-                "ext": row.get("שלוחה להשמעה",""),
-                "message": row.get("טקסט להשמעה","")
+                "name": r.get("שם הגמח",""),
+                "ext" : r.get("שלוחה להשמעה",""),
+                "message": r.get("טקסט להשמעה","")
             })
         return rows
     except Exception as e:
-        print("Error loading sheet:", e)
+        print("Sheet load error:", e)
         return []
 
-def transcribe_with_eleven(path):
-    if ELEVEN_API_KEY is None:
-        print("ELEVEN_API_KEY not set")
+def stt_eleven(path):
+    if not ELEVEN_API_KEY:
+        print("ELEVEN_API_KEY missing!")
         return ""
     headers = {"xi-api-key": ELEVEN_API_KEY}
     files = {"file": open(path,"rb")}
@@ -40,20 +39,21 @@ def transcribe_with_eleven(path):
         js = r.json()
         return js.get("text","")
     except Exception as e:
-        print("STT error:", e)
+        print("Eleven STT error:", e)
         return ""
 
 def handle_text(text):
+    print("===> handle_text():", text)
     text = text.lower()
     sheet = load_sheet()
     matches=[]
     for row in sheet:
         name_words = row["name"].lower().split()
         msg_lower = row["message"].lower()
-        score = 0
+        score=0
         for w in text.split():
             if w in name_words or w in msg_lower:
-                score +=1
+                score+=1
         if score>=1:
             matches.append(row)
     if not matches:
@@ -65,42 +65,51 @@ def handle_text(text):
         elif m["message"]:
             return f"say_api_answer=yes\nid_list_message=t-{m['message']}"
         else:
-            return "say_api_answer=yes\nid_list_message=t-גמ\"ח נמצא אך אין מידע נוסף"
+            return "say_api_answer=yes\nid_list_message=t-גמח נמצא אך אין מידע נוסף"
+    # many results
     tts="מצאתי מספר גמחים:\n"
     for i,m in enumerate(matches[:5],1):
-        tts+=f"{i}. {m['name']}\n"
+        tts += f"{i}. {m['name']}\n"
     return f"say_api_answer=yes\nid_list_message=t-{tts}"
 
-@app.route("/",methods=["POST"])
+# ---- routes ----
+@app.route("/", methods=["POST"])
 def api():
-    if "search_term" in request.form and request.form.get("search_term"):
+    print("---- NEW POST ----")
+    print("Headers:", dict(request.headers))
+    print("Form data keys:", list(request.form.keys()))
+
+    if request.form.get("search_term"):
         text=request.form.get("search_term")
         print("VOICE TEXT:", text)
         return handle_text(text)
-    if "file_url" in request.form:
-        file_url=request.form.get("file_url")
-        print("Got file url:", file_url)
+
+    if request.form.get("file_url"):
+        url=request.form.get("file_url")
+        print("file_url received:", url)
         try:
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                r=requests.get(file_url,timeout=30)
-                tmp.write(r.content)
-                tmp_path=tmp.name
-            text=transcribe_with_eleven(tmp_path)
-            print("ELEVEN STT:", text)
-            os.unlink(tmp_path)
+            tmp=tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            r=requests.get(url, timeout=30)
+            tmp.write(r.content)
+            tmp.close()
+            text=stt_eleven(tmp.name)
+            print("STT result:", text)
+            os.unlink(tmp.name)
             if text:
                 return handle_text(text)
             else:
                 return "say_api_answer=yes\nid_list_message=t-לא הצלחתי להבין את ההקלטה"
         except Exception as e:
-            print("Download/STT error:",e)
-            return "say_api_answer=yes\nid_list_message=t-שגיאה בטיפול בהקלטה"
-    return "say_api_answer=yes\nid_list_message=t-לא התקבל נתון"
+            print("Download/STT chain error:", e)
+            return "say_api_answer=yes\nid_list_message=t-שגיאה בעת עיבוד ההקלטה"
 
-@app.route("/",methods=["GET"])
+    print("No usable fields in POST")
+    return "say_api_answer=yes\nid_list_message=t-לא קיבלתי נתונים"
+
+@app.route("/", methods=["GET"])
 def home():
     return "OK"
 
-if __name__=="__main__":
+if __name__ == "__main__":
     port=int(os.environ.get("PORT",5000))
-    app.run(host="0.0.0.0",port=port)
+    app.run(host="0.0.0.0", port=port)
