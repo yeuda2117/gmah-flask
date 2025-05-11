@@ -26,6 +26,7 @@ def get_gmahim():
 
 @app.route("/", methods=["POST"])
 def handle_api():
+    print("POST DATA:", request.form)
     voice_text = request.form.get("search_term", "").lower()
     print("זוהה טקסט:", voice_text)
 
@@ -36,9 +37,13 @@ def handle_api():
     matches = []
 
     for gmah in gmahim:
-        gmah_words = gmah["name"].lower().split()
-        score = sum(1 for word in gmah_words if word in voice_text)
-        if score >= 2:
+        # בדיקה לפי עמודה A (שם הגמח)
+        name_score = sum(1 for word in gmah["name"].lower().split() if word in voice_text)
+
+        # בדיקה לפי עמודה C (הטקסט להשמעה)
+        message_score = sum(1 for word in voice_text.split() if word in gmah["message"].lower())
+
+        if name_score >= 1 or message_score >= 1:
             matches.append(gmah)
 
     if len(matches) == 1:
