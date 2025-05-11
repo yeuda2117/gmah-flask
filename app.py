@@ -96,10 +96,46 @@ def api():
     logging.info("Headers: %s", dict(request.headers))
     logging.info("Form keys: %s", list(request.form.keys()))
     # Voice pathway
-    if request.form.get("search_term"):
-        text=request.form.get("search_term")
-        logging.info("VOICE TEXT: '%s'", text)
-        return handle_text(text)
+    # ---- treat search_term first ----
+if request.form.get("search_term"):
+    text = request.form.get("search_term")
+    logging.info("VOICE TEXT (raw): '%s'", text)
+
+    # האם זה שם קובץ ולא טקסט?
+    if text.endswith(".wav"):
+        extension = request.form.get("ApiExtension", "").lstrip("/")  # לדוגמה 200
+        url = f"https://media.yemot.co.il/Msgs/{extension}/{text}"
+        logging.info("🔁 downloading from: %s", url)
+
+        try:
+            # הורדה לקובץ זמני
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(r.content)
+                tmp_path = tmp.name
+
+            # שליחה ל-ElevenLabs
+            text = stt_eleven(tmp_path)
+            os.unlink(tmp_path)
+            logging.info("🎤 ELEVEN TEXT: '%s'", text)
+
+        except Exception as e:
+            logging.error("Download/STT error: %s", e)
+            return "say_api_answer=yes\nid_list_message=t-שגיאה בעיבוד ההקלטה"
+
+    else:
+        logging.info("✅ VOICE TEXT (ready): '%s'", text)
+
+    # עכשיו יש לנו טקסט אמיתי → נמשיך כרגיל
+    return handle_text(text)
+
+# ---- Record pathway (file_url) ----
+if request.form.get("file_url"):
+    url = request.form.get("file_url")
+    logging.info("file_url received: %s", url)
+    ...
+
     # Record pathway
     if request.form.get("file_url"):
         url=request.form.get("file_url")
