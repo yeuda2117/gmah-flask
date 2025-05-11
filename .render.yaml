@@ -1,7 +1,6 @@
-
 services:
   - type: web
-    name: gmah-api-enhanced
+    name: gmah-api-eleven
     env: python
     plan: free
     buildCommand: ""
