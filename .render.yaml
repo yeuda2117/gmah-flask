@@ -1,6 +1,7 @@
+
 services:
   - type: web
-    name: gmah-api-smart
+    name: gmah-api-final-fixed
     env: python
     plan: free
     buildCommand: ""
