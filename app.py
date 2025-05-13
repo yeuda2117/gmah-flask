@@ -82,6 +82,33 @@ def handle_text(text: str):
         if partial_match(q, row["name_clean"]) or partial_match(q, row["msg_clean"]):
             matches.append(row)
 
+    def handle_text(text: str):
+    q = clean_text(text)
+    rows = load_sheet()
+
+    matches = []
+    for row in rows:
+        if partial_match(q, row["name_clean"]) or partial_match(q, row["msg_clean"]):
+            matches.append(row)
+
+    logging.info("🔍 matches found: %d", len(matches))   # <-- לוג חדש
+
+    if not matches:
+        return "say_api_answer=yes\r\nid_list_message=t-לא נמצא גמח מתאים"
+
+    if len(matches) == 1:
+        m = matches[0]
+        if m["ext"]:
+            return f"go_to_folder=/{m['ext']}"
+        msg = m["msg"] or "אין מידע נוסף"
+        return f"say_api_answer=yes\r\nid_list_message=t-{msg}"
+
+    # כמה תוצאות
+    tts = "מצאתי יותר מגמח אחד:\\n"
+    for i, m in enumerate(matches[:5], 1):
+        tts += f\"{i}. {m['name']}\\n\"
+    return f\"say_api_answer=yes\\r\\nid_list_message=t-{tts}\"
+
     if not matches:
         return "say_api_answer=yes\nid_list_message=t-לא נמצא גמח מתאים"
 
