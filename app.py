@@ -1,9 +1,9 @@
-"""Flask API for Yemot Gmach search – improved matching + logging
-----------------------------------------------------------------
-• clean_text – מנרמל טקסט (הורדת ניקוד/תווים מיוחדים).
-• partial_match – התאמה חלקית (in + fuzzy ratio).
-• לוגים: כמה התאמות נמצאו + פירוט שמות.
-• מתבסס רק על search_term (זיהוי דיבור של ימות).
+"""Flask API for Yemot Gmach search – improved matching + debug logging
+---------------------------------------------------------------------
+• clean_text – מנרמל טקסט.
+• partial_match – התאמה חלקית + fuzzy.
+• לוגים: בדיקה של כל שורה + תוצאות סופיות.
+• מתבסס על search_term (זיהוי־דיבור בימות).
 """
 
 from flask import Flask, request
@@ -70,6 +70,7 @@ def handle_text(text: str):
     rows = load_sheet()
     matches = []
     for row in rows:
+        logging.info("🔎 checking row: name='%s', msg='%s'", row["name_clean"], row["msg_clean"])
         if partial_match(q, row["name_clean"]) or partial_match(q, row["msg_clean"]):
             matches.append(row)
 
