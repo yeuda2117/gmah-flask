@@ -9,7 +9,7 @@
 """
 
 from flask import Flask, request
-import requests, csv, re, difflib, time, logging
+import os, requests, csv, re, difflib, time, logging  # ← הוספנו os
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -77,7 +77,7 @@ def handle_text(text: str) -> str:
     rows = load_sheet()
     matches = []
     for row in rows:
-        logging.info("🔎 check: name='%' msg='%'", row["name_clean"], row["msg_clean"])
+        logging.info("🔎 check: name='%s' msg='%s'", row["name_clean"], row["msg_clean"])
         if fuzzy_match(q, row["name_clean"]) or fuzzy_match(q, row["msg_clean"]):
             matches.append(row)
 
