@@ -1,48 +1,58 @@
-"""Flask API for Yemot Gmach search – improved matching + debug logging
----------------------------------------------------------------------
-• clean_text – מנרמל טקסט.
-• partial_match – התאמה חלקית + fuzzy.
-• לוגים: בדיקה של כל שורה + תוצאות סופיות.
-• מתבסס על search_term (זיהוי־דיבור בימות).
+"""gmach‑api v4  — minimal version
+====================================
+▪ מקבל search_term מזיהוי־דיבור של ימות.
+▪ קורא Google Sheets (עמודות A‑C). אין שימוש בשלוחה.
+▪ מחפש התאמה חלקית בשם הגמ"ח (A) או בטקסט להשמעה (C).
+▪ אם נמצא – מחזיר טקסט ההקראה (column C) ב‑TTS.
+▪ אם אין התאמה – מחזיר הודעת "לא נמצא".
+▪ אם יש כמה התאמות – קורא את שמות הגמ"חים.
 """
 
 from flask import Flask, request
-import requests, os, csv, logging, time, re, difflib
+import requests, csv, re, difflib, time, logging
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1jK7RsgJzi26JqBd40rqwzgldm9HKeGAp6Z4_8sR524U/export?format=csv"
+# ----- CONFIG ----------------------------------------------------------------
+SHEET_URL = (
+    "https://docs.google.com/spreadsheets/"
+    "d/1jK7RsgJzi26JqBd40rqwzgldm9HKeGAp6Z4_8sR524U/export?format=csv"
+)
+CACHE_TTL = 120  # seconds
 
+# -----------------------------------------------------------------------------
 app = Flask(__name__)
-_sheet_cache = {"ts": 0, "rows": []}
+_sheet_cache = {"ts": 0.0, "rows": []}
 
-# -------------------------------------------------------------
-# helpers
-# -------------------------------------------------------------
+# ----- helpers ----------------------------------------------------------------
 
-def clean_text(txt: str) -> str:
+def normalize(txt: str) -> str:
+    """lowercase, remove nikud & punctuation, collapse spaces"""
     if not txt:
         return ""
-    txt = re.sub(r"[\u0590-\u05C7]", "", txt)        # ניקוד
-    txt = re.sub(r"[^\w\s]", "", txt)                # סימנים מיוחדים
+    txt = re.sub(r"[\u0591-\u05C7]", "", txt)  # ניקוד
+    txt = re.sub(r"[^\w\s]", " ", txt)         # סימנים
     return re.sub(r"\s+", " ", txt.lower()).strip()
 
 
 def load_sheet():
     now = time.time()
-    if now - _sheet_cache["ts"] < 120 and _sheet_cache["rows"]:
+    if now - _sheet_cache["ts"] < CACHE_TTL and _sheet_cache["rows"]:
         return _sheet_cache["rows"]
     try:
         r = requests.get(SHEET_URL, timeout=10)
         r.raise_for_status()
         reader = csv.DictReader(r.text.splitlines())
-        rows = [{
-            "name": row.get("שם הגמח", "").strip(),
-            "name_clean": clean_text(row.get("שם הגמח", "")),
-            "ext": row.get("שלוחה להשמעה", "").strip(),
-            "msg": row.get("טקסט להשמעה", "").strip(),
-            "msg_clean": clean_text(row.get("טקסט להשמעה", ""))
-        } for row in reader]
+        rows = [
+            {
+                "name": row.get("שם הגמח", "").strip(),
+                "name_clean": normalize(row.get("שם הגמח", "")),
+                "msg": row.get("טקסט להשמעה", "").strip(),
+                "msg_clean": normalize(row.get("טקסט להשמעה", "")),
+            }
+            for row in reader
+            if any(row.values())
+        ]
         _sheet_cache.update(ts=now, rows=rows)
         logging.info("Sheet ↻ %d rows", len(rows))
         return rows
@@ -51,71 +61,57 @@ def load_sheet():
         return []
 
 
-def partial_match(q: str, target: str) -> bool:
+def fuzzy_match(q: str, target: str) -> bool:
     if not q or not target:
         return False
     if q in target:
         return True
     return difflib.SequenceMatcher(None, q, target).ratio() >= 0.6
 
-# -------------------------------------------------------------
-# core logic
-# -------------------------------------------------------------
 
-def handle_text(text: str):
-    q = clean_text(text)
+def handle_text(text: str) -> str:
+    q = normalize(text)
     if not q:
-        return "say_api_answer=yes\rid_list_message=t-לא התקבל טקסט"
+        return "say_api_answer=yes\nid_list_message=t-לא התקבל טקסט לחיפוש"
 
     rows = load_sheet()
     matches = []
     for row in rows:
-        logging.info("🔎 checking row: name='%s', msg='%s'", row["name_clean"], row["msg_clean"])
-        if partial_match(q, row["name_clean"]) or partial_match(q, row["msg_clean"]):
+        logging.info("🔎 check: name='%' msg='%'", row["name_clean"], row["msg_clean"])
+        if fuzzy_match(q, row["name_clean"]) or fuzzy_match(q, row["msg_clean"]):
             matches.append(row)
 
-    logging.info("🔍 matches found: %d", len(matches))
-    for i, m in enumerate(matches):
-        logging.info("📍 Match %d: %s", i + 1, m["name"])
+    logging.info("🔍 total matches: %d", len(matches))
 
     if not matches:
-        return "say_api_answer=yes\rid_list_message=t-לא נמצא גמח מתאים"
+        return "say_api_answer=yes\nid_list_message=t-לא נמצא גמ""ח מתאים"
 
     if len(matches) == 1:
-        m = matches[0]
-        if m["ext"]:
-            return f"go_to_folder=/{m['ext']}"
-        msg = m["msg"] or "אין מידע נוסף"
-        return f"say_api_answer=yes\rid_list_message=t-{msg}"
+        # single hit – הקראה מלאה של הטקסט בעמודה C
+        msg = matches[0]["msg"] or "אין מידע נוסף"
+        return f"say_api_answer=yes\nid_list_message=t-{msg}"
 
-    tts = "מצאתי יותר מגמח אחד:\n"
-    for i, m in enumerate(matches[:5], 1):
-        tts += f"{i}. {m['name']}\n"
-    return f"say_api_answer=yes\rid_list_message=t-{tts}"
+    # multiple hits – נקרא רק את השמות
+    tts = "נמצאו כמה גמחים:\n" + "\n".join(f"{i+1}. {m['name']}" for i, m in enumerate(matches[:5]))
+    return f"say_api_answer=yes\nid_list_message=t-{tts}"
 
-# -------------------------------------------------------------
-# routes
-# -------------------------------------------------------------
+# ----- routes -----------------------------------------------------------------
 
 @app.route("/", methods=["POST"])
 def api():
-    logging.info("---- NEW POST ----")
-    logging.info("Form keys: %s", list(request.form.keys()))
+    if not request.form:
+        return "say_api_answer=yes\nid_list_message=t-בקשה לא תקינה"
 
-    if request.form.get("search_term"):
-        raw = request.form.get("search_term")
-        logging.info("🎤 raw text: '%s'", raw)
-        return handle_text(raw)
-
-    logging.warning("POST missing search_term")
-    return "say_api_answer=yes\rid_list_message=t-לא קיבלתי נתון זיהוי"
+    text = request.form.get("search_term", "")
+    logging.info("🎤 raw text: '%s'", text)
+    return handle_text(text)
 
 
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
-    return "OK - gmach matcher v3"
+    return "OK – gmach‑api v4"
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=False)
