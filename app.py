@@ -1,6 +1,6 @@
-"""gmach‑api v6 — Google‑Sheets → Yemot
+"""gmach‑api v7 — Google‑Sheets → Yemot
 =================================================
-* קורא גיליון Google ב‑CSV ומזהה עמודות לפי כותרות.
+* קורא גיליון Google ב‑CSV ומזהה עמודות לפי כותרות—even if כוללות תו BOM.
 * עמודה **שם הגמח** (A) ו‑**טקסט להשמעה** (C).
 * חיפוש fuzzy ומשיב את הטקסט כ‑TTS.
 """
@@ -25,26 +25,34 @@ _sheet_cache = {"ts": 0.0, "rows": []}
 # ----- helpers -------------------------------------------------------------
 
 def normalize(txt: str) -> str:
+    """Remove Nikud, punctuation, excessive spaces; lower‑case."""
     if not txt:
         return ""
-    txt = re.sub(r"[\u0591-\u05C7]", "", txt)   # נקד
+    txt = re.sub(r"[\u0591-\u05C7]", "", txt)   # ניקוד
     txt = re.sub(r"[^\w\s]", " ", txt)
     return re.sub(r"\s+", " ", txt.lower()).strip()
 
 
 def load_sheet():
+    """Download sheet, cache, return list of dicts with cleaned fields."""
     now = time.time()
     if now - _sheet_cache["ts"] < CACHE_TTL and _sheet_cache["rows"]:
         return _sheet_cache["rows"]
     try:
         r = requests.get(SHEET_URL, timeout=10)
         r.raise_for_status()
-        f = io.StringIO(r.text)
-        reader = csv.DictReader(f)
+        f = io.StringIO(r.content.decode("utf-8-sig"))  # ✨ strip BOM if קיימת
+        raw_reader = csv.reader(f)
+        headers = [h.strip() for h in next(raw_reader)]
+        headers = [h.replace("\ufeff", "") for h in headers]
+        # build DictReader manually so we can clean headers
         rows = []
-        for row in reader:
-            name = row.get("שם הגמח", "").strip()
-            msg = row.get("טקסט להשמעה", "").strip()
+        for raw in raw_reader:
+            row = dict(zip(headers, raw))
+            # try locating columns even if השמות מעט שונים
+            name = row.get("שם הגמח") or row.get("שם") or row.get("הגמח") or ""
+            msg = row.get("טקסט להשמעה") or row.get("טקסט") or ""
+            name, msg = name.strip(), msg.strip()
             if not (name or msg):
                 continue
             rows.append({
@@ -88,6 +96,7 @@ def handle_text(text: str) -> str:
     if len(matches) == 1:
         return f"say_api_answer=yes\nid_list_message=t-{matches[0]['msg'] or 'אין מידע נוסף'}"
 
+    # multiple matches → רשימה
     tts = "נמצאו כמה גמחים:\n" + "\n".join(
         f"{i+1}. {m['name']}" for i, m in enumerate(matches[:5])
     )
@@ -104,10 +113,9 @@ def api():
 
 @app.route("/")
 def home():
-    return "OK – gmach‑api v6"
+    return "OK – gmach‑api v7"
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
