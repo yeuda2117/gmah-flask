@@ -1,22 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-gmah-api v8
-===========
-
-* מחובר ל-Yemot כ-API (POST).
-* מקבל search_term (טקסט שהמערכת זיהתה בדיבור).
-* מחפש בגיליון Google Sheets ומשיב:
-    – go_to_folder=/<ext>  אם קיימת שלוחה ייעודית
-    – id_list_message=t-<טקסט>  אם יש הודעה
-    – הודעת “לא נמצא” אם אין התאמות.
-
-הקובץ עצמאי – אין צורך בספריות חיצוניות מעבר ל-requests ו-Flask.
+gmah-api v8  (fixed import os)
 """
-
 from flask import Flask, request
-import requests, csv, time, logging, re, unicodedata
-from pathlib import Path
+import os, requests, csv, time, logging, re, unicodedata   # ← נוספו os ו-unicodedata
 
 # ------------------------------------------------------------
 # CONFIG
@@ -25,7 +13,7 @@ SHEET_URL = (
     "https://docs.google.com/spreadsheets/d/"
     "1jK7RsgJzi26JqBd40rqwzgldm9HKeGAp6Z4_8sR524U/export?format=csv"
 )
-CACHE_TTL = 120  # שניות
+CACHE_TTL = 120  # seconds
 
 # ------------------------------------------------------------
 # LOGGING
@@ -41,18 +29,23 @@ logging.basicConfig(
 _sheet_cache = {"time": 0.0, "rows": []}
 
 
+def clean_txt(t: str) -> str:
+    t = t.lower()
+    t = "".join(ch for ch in unicodedata.normalize("NFD", t)
+                if not unicodedata.combining(ch))          # remove nikud
+    t = re.sub(r"[^\w\s]", " ", t)                         # punctuation
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def load_sheet():
-    """טוען את הגיליון (עם קאש)."""
     now = time.time()
     if now - _sheet_cache["time"] < CACHE_TTL and _sheet_cache["rows"]:
         return _sheet_cache["rows"]
-
     try:
         r = requests.get(SHEET_URL, timeout=10)
         r.raise_for_status()
-        reader = csv.DictReader(r.text.splitlines())
         rows = []
-        for row in reader:
+        for row in csv.DictReader(r.text.splitlines()):
             rows.append(
                 {
                     "name": row.get("שם הגמח", "").strip(),
@@ -60,8 +53,7 @@ def load_sheet():
                     "msg": row.get("טקסט להשמעה", "").strip(),
                 }
             )
-        _sheet_cache["rows"] = rows
-        _sheet_cache["time"] = now
+        _sheet_cache.update(time=now, rows=rows)
         logging.info("Sheet ↻ %d rows", len(rows))
         return rows
     except Exception as err:
@@ -69,45 +61,27 @@ def load_sheet():
         return []
 
 
-def clean_text(s: str) -> str:
-    """Normalize Hebrew: lowercase, remove נִיקּוּד, סימני פיסוק ורווחים כפולים."""
-    s = s.lower()
-    # הסרת ניקוד
-    s = "".join(ch for ch in unicodedata.normalize("NFD", s) if not unicodedata.combining(ch))
-    # הסרת תווים לא רלוונטיים
-    s = re.sub(r"[^\w\s]", " ", s)
-    # רווחים מיותרים
-    return re.sub(r"\s+", " ", s).strip()
-
-
-def partial_match(q: str, txt: str) -> bool:
-    """האם כל אחת מהמילים ב-q מופיעה ב-txt (התאמה רופפת)."""
+def partial_match(q: str, rec: str) -> bool:
     q_words = q.split()
-    return all(w in txt for w in q_words)
+    rec = clean_txt(rec)
+    return all(w in rec for w in q_words)
 
 
 def handle_text(text: str) -> str:
-    """מקבל טקסט, מחפש בגיליון ומחזיר מחרוזת תשובה ל-Yemot."""
-    q = clean_text(text)
+    q = clean_txt(text)
     if not q:
         return "say_api_answer=yes\nid_list_message=t-לא התקבל טקסט"
 
-    rows = load_sheet()
     matches = []
-
-    for row in rows:
-        name_clean = clean_text(row["name"])
-        msg_clean = clean_text(row["msg"])
-        if partial_match(q, name_clean) or partial_match(q, msg_clean):
+    for row in load_sheet():
+        if partial_match(q, row["name"]) or partial_match(q, row["msg"]):
             matches.append(row)
 
     logging.info("🔍 total matches: %d", len(matches))
 
-    # ---- ללא התאמות ----
     if not matches:
         return "say_api_answer=yes\nid_list_message=t-לא נמצא גמח מתאים"
 
-    # ---- התאמה יחידה ----
     if len(matches) == 1:
         m = matches[0]
         if m["ext"]:
@@ -115,7 +89,6 @@ def handle_text(text: str) -> str:
         msg = m["msg"] or "אין מידע נוסף"
         return f"say_api_answer=yes\nid_list_message=t-{msg}"
 
-    # ---- כמה התאמות – מחזיר רשימה קולית ----
     tts = "מצאתי כמה גמחים:\n"
     for i, m in enumerate(matches[:5], 1):
         tts += f"{i}. {m['name']}\n"
@@ -140,7 +113,7 @@ def api():
 
 @app.route("/")
 def home():
-    return "OK – gmah-api v8"
+    return "OK – gmach-api v8"
 
 
 if __name__ == "__main__":
