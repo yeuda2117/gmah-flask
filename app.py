@@ -108,7 +108,9 @@ def handle_text(text: str) -> str:
 def api():
     text = request.form.get("search_term", "")
     logging.info("🎤 raw text: '%s'", text)
-    return handle_text(text)
+    resp = handle_text(text)
+    logging.info("⤴️  response to Yemot: %s", resp.encode('utf-8'))
+    return resp
 
 
 @app.route("/")
