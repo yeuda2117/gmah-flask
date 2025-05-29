@@ -64,10 +64,32 @@ def map_header(name: str) -> str:
     }
     return ix.get(name, "")
 
+import io  # בתחילת הקובץ, אם לא מופיע
+
 def load_sheet():
     now = time.time()
-    if now - _cache["t"] < CACHE_TTL and _cache["rows"]:
-        return _cache["rows"]
+    if now - _sheet_cache["time"] < 120 and _sheet_cache["rows"]:
+        return _sheet_cache["rows"]
+    try:
+        resp = requests.get(SHEET_URL, timeout=10)
+        resp.raise_for_status()
+        # השורה החשובה – שימוש ב־io.StringIO ודקדוד UTF-8
+        reader = csv.DictReader(io.StringIO(resp.content.decode('utf-8')))
+        rows = []
+        for r in reader:
+            rows.append({
+                "name": r.get("שם הגמח", "").strip(),
+                "ext": r.get("שלוחה להשמעה", "").strip(),
+                "msg": r.get("טקסט להשמעה", "").strip()
+            })
+        _sheet_cache["rows"] = rows
+        _sheet_cache["time"] = now
+        logging.info("Sheet loaded %d rows", len(rows))
+        return rows
+    except Exception as e:
+        logging.error("Sheet load error: %s", e)
+        return []
+
 
     rows = []
     try:
