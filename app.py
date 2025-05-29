@@ -7,6 +7,7 @@ gmach-api v9  –  resilient header mapping & safe output
 import os, csv, time, re, logging, difflib
 from flask import Flask, request
 import requests
+_sheet_cache = {"time": 0, "rows": []}
 
 # --------------------------------------------------
 # logging
