@@ -15,7 +15,8 @@ def api():
     response_text = "say_api_answer=yes\nid_list_message=t-שלום! זה בדיקת טקסט בעברית בלבד."
 
     # החזרה בקידוד windows-1255 כפי שדורש ימות המשיח
-    return Response("id_list_message=t-Test only".encode("windows-1255"), content_type="text/plain; charset=windows-1255")
+    return Response("id_list_message=t-Test only", content_type="text/plain")
+
 
 @app.route("/", methods=["GET"])
 def home():
