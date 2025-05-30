@@ -157,7 +157,8 @@ def api():
     logging.info("🎤 raw text: '%s'", text)
     resp = handle(text)
     logging.info("⤴️  response: %s", resp.encode("utf-8"))
-    return resp
+    return "say_api_answer=yes\nid_list_message=t-Test only\n"
+
 
 @app.route("/")
 def home():
